@@ -15,6 +15,14 @@ resource "aws_subnet" "public" {
   availability_zone = "ap-northeast-1a"
 }
 
+resource "aws_subnet" "public10" {
+  vpc_id = aws_vpc.new_vpc.id
+  cidr_block = "172.18.10.0/24"
+  map_public_ip_on_launch = true
+  availability_zone = "ap-northeast-1c"   # 도쿄는 1b 현재 없음
+}
+
+
 # 서브넷 > 프라이빗 서브넷(공인주소 할당 불가능)
 resource "aws_subnet" "private" {
   vpc_id = aws_vpc.new_vpc.id
@@ -31,7 +39,7 @@ resource "aws_internet_gateway" "gw" {
   }
 }
 
-# EIP 발급받기 > NAT Gateway 에서 사용할 용도
+# EIP 발급받기 > NAT Gateway 에서 사용할 용도(외부에서 인스턴스로 들어갈 수는 없다)
 resource "aws_eip" "nat" {
   domain = "vpc"
 }
@@ -48,6 +56,7 @@ resource "aws_route_table" "public" {
   vpc_id = aws_vpc.new_vpc.id
 }
 
+# public 용 라우팅 테이블 작성 > (적용 서브넷) > public(172.18.1.0/24),public10(172.18.10.0/24) 
 resource "aws_route" "public_internet_access" {
   route_table_id = aws_route_table.public.id
   destination_cidr_block = "0.0.0.0/0"
@@ -67,11 +76,16 @@ resource "aws_route" "private_nat_access" {
 
 # 작성된 라우팅 테이블을 서브넷과 연결해야 한다
 resource "aws_route_table_association" "public" {
-  subnet_id      = aws_subnet.public.id
+  subnet_id      = aws_subnet.public.id           # 172.18.1.0/24 (공인)
   route_table_id = aws_route_table.public.id
 }
 
+resource "aws_route_table_association" "public10" {
+  subnet_id      = aws_subnet.public10.id           # 172.18.10.0/24 (공인)
+  route_table_id = aws_route_table.public.id        # 0.0.0.0/0-igw, 172.18.0.0/16-local
+}
+
 resource "aws_route_table_association" "private" {
-  subnet_id      = aws_subnet.private.id
+  subnet_id      = aws_subnet.private.id           # 172.18.2.0/24 (사설)
   route_table_id = aws_route_table.private.id
 }

@@ -2,6 +2,14 @@
 resource "aws_security_group" "private_instance_sg" {
   vpc_id = aws_vpc.new_vpc.id
 
+  # 웹 서비스 포트
+  ingress {
+    from_port = var.server_port  
+    to_port = var.server_port
+    protocol = "tcp"
+    cidr_blocks = ["172.18.1.0/24"]  # public subnet 으로부터의 웹 접속만 허용
+  }
+
   ingress {
     from_port = 22
     to_port = 22
@@ -31,9 +39,21 @@ resource "aws_launch_template" "private" {
   key_name = aws_key_pair.test1.key_name
   instance_type = "t3.small"
   network_interfaces {
-    associate_public_ip_address = false
+    associate_public_ip_address = false   # 공인주소할당없음 | nat gateway 를 통해 외부 통신가능
     subnet_id = aws_subnet.private.id
     security_groups = [ aws_security_group.private_instance_sg.id ]
+  }
+  # 인스턴스 처음 시작할 때 실행할 내용(웹 서버설치, 구성)
+  user_data = base64encode(<<-EOF
+      #!/bin/bash
+      sudo yum -y install httpd
+      sudo sed -i "/^Listen/c\Listen ${var.server_port}" /etc/httpd/conf/httpd.conf 
+      echo "HELLO AWS" | sudo tee /var/www/html/index.html 
+      sudo systemctl restart httpd 
+      EOF
+      )
+  lifecycle {
+    create_before_destroy = true  # 먼저 생성한 뒤, 기존 서버 삭제
   }
 }
 
@@ -42,12 +62,18 @@ resource "aws_launch_template" "private" {
 resource "aws_autoscaling_group" "asg_private" {
   min_size = 1
   max_size = 3
-  desired_capacity = 3
+  desired_capacity = 2
   vpc_zone_identifier = [ aws_subnet.private.id ] # ap-northeast-1a
 
   launch_template {
     id = aws_launch_template.private.id
     version = "$Latest"
+  }
+
+  # 라이프사이클 관리 (user_data 가 변경되면 신규 생성/먼저 만들고 기존 인스턴스 삭제)
+  lifecycle {
+    create_before_destroy = true
+    replace_triggered_by = [ aws_launch_template.private.user_data ]
   }
 
   tag {
